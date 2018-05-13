@@ -1,0 +1,474 @@
+\documentclass{article}
+\begin{document}
+
+\SweaveOpts{concordance=TRUE}
+
+\noindent 10 April 2018 Cambridge
+
+\noindent This document contains {\tt R} code and guidelines for
+implementing the methods proposed in the paper "A Bayesian Approach to 
+Mendelian Randomisation with Multiple Pleiotropic Variants" by Carlo Berzuini,
+Hui Guo, Stephen Burgess and Luisa Bernardinelli (Universities
+of Manchester, Cambridge and Pavia). Availability of the 
+programs {\tt R} and {\tt STAN} and of two relevant
+{\tt R} libraries is assumed.
+
+\vspace{0.3cm}
+
+\noindent Two useful functions are given below, which may be used
+as building blocks within an {\tt R} program for a Mendelian Randomisation study.
+They are discussed one by one in the following two sectiopns.
+
+\section{{\tt STAN} code}
+
+\noindent Find below the STAN code for the model described
+in Equations (3.1-3.3) of the paper, with a horseshoe
+prior for the $\beta$ coefficients. Data and parameter names
+in the code, as well as throughout this document, is consistent
+with that used in the mentioned paper. The implementation assumes
+that the following data structures are present in the
+{\tt R} workspace:
+
+\begin{description}
+\item[$N$:] number of sample units
+\item[$J$:] number of instruments
+\item[...] ...
+\end{description}
+
+\vspace{0.3cm}
+
+\noindent Note that the STAN
+code for the model is bracketed by quotation marks, as it
+is fed into STAN as a character string.
+
+<<>>=
+stanmodelcode <-'
+/* lg_t.stan */
+functions {
+// Vector square root
+vector vecsqrt(vector x) {
+	vector[dims(x)[1]] res;
+	for (m in 1:dims(x)[1]){
+		res[m] = sqrt(x[m]);
+	}
+return res; }
+}
+data {
+  int<lower=0> N; 
+  int<lower=0> J;    
+  matrix[N,J] Z;
+  vector[N] X; 
+  vector[N] Y; 
+}
+parameters {
+  real <lower=0> sigmax; 
+  real <lower=0> sigmay;
+  real <lower=0> sigmaalpha;
+  real<lower=0> r1_global;
+  real<lower=0> r2_global;
+  real mualpha;
+  real omegax;
+  real omegay;
+  real deltax;
+  real deltay;
+  real theta;
+  vector[N] u; 
+  vector[J] z;
+  vector<lower=0>[J] r1_local;
+  vector<lower=0>[J] r2_local;
+  vector[J] alpha;
+}
+transformed parameters {
+   real<lower=0> tau;
+   vector<lower=0> [J] lambda;
+   vector[J] beta;
+   tau      = r1_global * sqrt(r2_global);
+   lambda	  = r1_local .* vecsqrt(r2_local);
+   beta	    =  z .* lambda*tau;
+}
+model {
+  X 	~ normal(omegax+Z*alpha+u*deltax, sigmax);
+  Y 	~ normal(omegay+Z*beta+X*theta+u*deltay, sigmay);
+  u 	~ normal(0,1);
+  
+  for(k in 1:J){
+    alpha[k] ~ normal(mualpha, sigmaalpha);
+  }
+// Constructing the prior for the lambda vector
+    z ~ normal(0, 1);
+    r1_local ~ normal(0.0, 1.0);
+    r2_local ~ inv_gamma(0.5, 0.5);
+// Constructing the prior for tau
+    r1_global ~ normal(0.0, 1.0);
+    r2_global ~ inv_gamma(0.5, 0.5);
+    }
+'
+@
+
+\noindent And this is a function to generate a new simulated
+dataset at each simulation run. Interpret the input arguments for this
+function as follows:
+
+\begin{description}
+\item[N:] number of sample units
+\item[J:] number of instruments
+\item[THETA:] the value for the causal effect
+\item[$\delta_{min},\delta_{max}$:] at each new simulation run, 
+a realisation of $\hat{\delta}$
+is drawn from a rectangular
+distribution on the interval $(\delta_{min}, \delta_{max})$
+\item[$\delta^x_{sd},\delta^y_{sd}$:] at each new simulation run, 
+a realisation of $\delta_X$ and one of $\delta_Y$ are
+independently drawn from  $N(\hat{\delta}, \delta^x_{sd})$
+and $N(\hat{\delta}, \delta^y_{sd})$, respectively
+\item[$\sigma^x_{min},\sigma^x_{max}$:] at each new simulation run, 
+a single realisation of $\sigma_X$ is drawn from a rectangular
+distribution on $(\sigma^x_{min}, \sigma^x_{max})$
+\item[$\sigma^y_{min},\sigma^y_{max}$:] at each new simulation run, 
+a single realisation of $\sigma_Y$ is drawn from a rectangular
+distribution on $(\sigma^y_{min}, \sigma^y_{max})$
+\item[fracnonzeroAlpha,$\alpha_{mean},\alpha_{sd}$:] at
+each new simulation run, a fraction $fracnonzeroAlpha$ of the elements
+of vector $\alpha$ are randomly selected and independently drawn from 
+$N(mean=\alpha_{mean},sd=\alpha_{sd})$. The remaining
+elements of vector $\alpha$ are set to zero.
+\item[$\omega^x_{mean},\omega^y_{mean},\omega^x_{sd},\omega^y_{sd}$:] at
+each new simulation run, parameters $\omega_X$ and $\omega_Y$
+are randomly drawn from $N(mean=\omega^x_{mean},sd= \omega^x_{sd} )$
+and $N(mean=\omega^y_{mean},sd= \omega^y_{sd} )$, respectively
+\item[pleiotropy:] can take values "BALANCED",
+"POSITIVE" or "NEGATIVE"
+\item[$pleio_{min},pleio_{max}$, $fractionpleiotropic$,$pleio_{sd}$:]
+at each new simulation run, a fraction $fractionpleiotropic$ of the elements
+of vector $\beta$ are randomly selected and independently drawn from 
+$N(mean=\beta_{mean},sd=\pleio_{sd})$, with the same
+$\beta_{mean}$ randomly drawn from a rectangular distribution
+on $(pleio_{min}, pleio_{max})$ and then changed of sign
+if pleiotropy $=$ "NEGATIVE" and set to zero
+if pleiotropy $=$ "BALANCED". The remaining
+elements of $\beta$ are set to zero.
+\end{description}
+
+<<>>=
+generate <- function(N,J,THETA,deltamin,deltamax,deltaxsd,deltaysd,sigmaxmin,
+            sigmaxmax,sigmaymin,sigmaymax,fracnonzeroAlpha,alphamean,alphasd,
+            omegaxmean,omegaymean,omegaxsd,omegaysd,pleiotropy,pleiomin,
+            pleiomax,fractionpleiotropic,pleiosd){
+U 				= array(rnorm(N, mean=0, sd=1), dim = N)
+MEANDELTA = runif(1, deltamin, deltamax)
+DELTAX 		= rnorm(1, mean= MEANDELTA, sd=deltaxsd)
+DELTAY 		= rnorm(1, mean= MEANDELTA, sd=deltaysd)
+nonzeroAlpha  = round(fracnonzeroAlpha*J)
+ALPHA = array(rep(0,J),dim=J)
+ALPHA[sample(c(1:J),size=nonzeroAlpha,prob=rep(1,J),replace=F)] = 
+          rnorm(nonzeroAlpha, mean= alphamean, sd=alphasd)
+OMEGAX 		= rnorm(1,mean=omegaxmean,sd=omegaxsd)
+OMEGAY 		= rnorm(1,mean=omegaymean,sd=omegaysd)
+X 				= array(Z%*%ALPHA, dim = N)
+X 				= X+OMEGAX+U*DELTAX
+SIGMAX		= runif(1,sigmaxmin,sigmaxmax)
+EPS 			= array(rnorm(N, mean=0, sd=SIGMAX), dim=N)
+X 			  = X+EPS
+MEANPLEIO = 0
+PLEIO 		= runif(1,pleiomin,pleiomax)
+if(pleiotropy == "POSITIVE")MEANPLEIO = PLEIO
+if(pleiotropy == "NEGATIVE")MEANPLEIO = -PLEIO
+BETA = array(rep(0,J), dim=J)
+HOWMANYPLEIOTROPIC = round(fractionpleiotropic*J)
+BETA[sample(c(1:J),size=HOWMANYPLEIOTROPIC,prob=rep(1,J),replace=F)] = 
+          rnorm(HOWMANYPLEIOTROPIC,mean=MEANPLEIO,sd=pleiosd)
+SIGMAY 		= runif(1,sigmaymin,sigmaymax)
+EPSILON 	= array(rnorm(N, mean=0, sd=SIGMAY), dim=c(N,1))
+esposizione 	= array(X*THETA, dim=c(N,1))
+confo		= array(U*DELTAY, dim= c(N,1))
+YBUF 		= OMEGAY+Z%*%BETA+esposizione+confo
+YBUF 		= YBUF+EPSILON
+Y 			= array(YBUF, dim=N)
+dataset= list(X=X,Y=Y,Z=Z,U=U)
+dataset
+}
+@
+
+
+
+\section{{\tt GENERATE} function
+
+
+
+\section{Application Example}
+
+
+\noindent First, we invoke two {\tt R} libraries. They can be installed
+from CRAN.
+
+<<>>=
+library(rstan)
+library(MendelianRandomization)
+@
+
+\vspace{0.3cm}
+\noindent Next comes an auxiliary formatting function
+
+<<>>=
+f = function(X1)gsub("0\\.","\\.", X1)
+@
+
+\noindent Next, we load into the
+{\tt R} worspace an example of instrumental matrix $Z$, with $J$
+columns corresponding to the instrumental SNPs, and $N$ rows corresponding
+to hypothetical individuals.
+
+ELIMINARE IL BLOCCO SUCCESSIVO
+<<>>=
+directory = "/Users/mdehscbx/Dropbox/MENDELIAN RANDOMIZATION/BIOSTATISTICS/PERGITHUB/"
+outdirectory = paste(directory,"RESULTS/",sep="")
+setwd(directory)
+load(file="dati.rda")
+J=D
+J
+ncol(Z)
+via <- matrix(NA, nrow = dim(Z)[1], ncol = dim(Z)[2])
+for (i in 1:dim(Z)[2]) {
+  via[,i] <- c(as.numeric(Z[[i]]))
+}
+Z = via
+colnames(Z)=colnames(data)[1:J]
+#CENTRATURA MATRICE G DEGLI SNP STRUMENTALI (ELIMINARE)
+for(ico in 1:ncol(Z)){
+  mea = mean(Z[!is.na(Z[,ico]),ico])
+Z[!is.na(Z[,ico]),ico]=(Z[,ico] - mea)
+}
+@
+
+\noindent Let us calculate the average SNP-SNP correlation in this
+particular set of data.
+<<>>=
+mean(cor(Z))
+@
+
+
+
+
+\noindent Next starts the main loop over the 
+$2 \times$ {\tt howManyRuns} simulation
+runs. Of these, {\tt howManyRuns} runs are performed with
+the null value for the causal effect, {\tt THETA} = 0,
+and further {\tt howManyRuns} are performed with the alternative
+value, {\tt THETA} = {\tt effectvalue}.
+
+\noindent We initialize vectors {\tt cover, positive}
+and {\tt bias}, so that at run {\tt isimul} the {\tt isimul}th
+element of {\tt cover} will indicate whether the 95\% credible interval
+for $\theta$ covers the true value of this parameter,
+{\tt positive}[isimul] will indicate whether the 95\% credible interval
+for $\theta$ lies entirely in the positive real axis, and
+{\tt bias}[isimul] will contain the difference between 
+the posterior mean and the true value
+of $\theta$.
+
+\vspace{0.2cm}
+
+\noindent {\em GENERATING THE NEXT SIMULATED DATASET.}
+At each {\tt isimul}-th run, the GENERATE function 
+is called to generate a new
+simulated dataset, consisting of a realization of the $N$-vectors
+{\tt X, Y} and {\tt U} and of the $N \times J$ matrix of instrumental
+variables.
+
+\vspace{0.2cm}
+
+\noindent {\em SUMMARY STATISTICS FROM THE GENERATED DATASET}.
+A number
+of quantities are then calculated from it. In particular, we
+calculate $\beta_X$, which is a $J$-vector containing the estimated
+unconditional slope of the (univariate) least squares regression of
+$X$ on each instrumental variable. 
+
+\vspace{0.2cm}
+
+\noindent Analogously, we calculate $\beta_Y$,
+which is a $J$-vector containing the estimated
+unconditional slope of the least squares regression of $Y$ on each
+instrumental variable. {\tt sebetaX} and {\tt sebetaY} contain the standard
+errors for each element of $\beta_X$ and $\beta_Y$, respectively.
+
+\vspace{0.2cm}
+
+\noindent The $\beta_X$ and $\beta_Y$ (and their standard errors)
+are used to calculate
+a preliminary estimate of the causal effect,
+called {\tt thetamedianestimate}, via weighted median
+estimator. 
+
+\vspace{0.2cm}
+
+\noindent {\em INITIALISING THE MARKOV CHAIN(S)}.
+The preliminary estimate of the causal effect is included in the list
+{\tt init}$_${\tt list} of starting
+values of the Markov chain(s). We specify a starting
+value for only a few parameters.
+
+\vspace{0.2cm}
+
+\noindent {\em RUNNING THE MARKOV CHAIN(S)}.
+The Markov chain(s) are activated by the
+command {\tt fit}. The instructions following this
+command perform the task of recording at each simulation
+run quantities needed in the final calculation of the
+performance measures. In particular, 
+
+\vspace{0.2cm}
+
+\noindent {\em POSTERIOR ANALYSIS}
+
+
+<<>>=
+howmanyMCMCiterations 	= 600
+effectvalue           = 0.35
+howManyRuns       =  70
+totalNumberOfRuns = 2*howManyRuns
+cover 	= array(NA, dim= totalNumberOfRuns)
+positive= array(NA, dim= totalNumberOfRuns)
+bias		= array(NA, dim= totalNumberOfRuns)
+Mlow 		= array(NA, dim= totalNumberOfRuns)#eliminare
+Mmediana	= array(NA, dim=2*howManyRuns)#eliminare
+Mhigh 		= array(NA, dim=2*howManyRuns)#eliminare
+Mcover 		= array(NA, dim=2*howManyRuns)#eliminare
+Mpositive	= array(NA, dim=2*howManyRuns)#eliminare
+Mbias		= array(NA, dim=2*howManyRuns)#eliminare
+quantistrong     = array(NA, dim=2*howManyRuns)#eliminare
+
+for(isimul in 1:(2*howManyRuns)){
+
+#GENERATING THE NEXT SIMULATED DATASET
+THETA = 0
+if(isimul > howManyRuns)THETA = effectvalue
+simulated = generate(N,J,THETA,
+deltamin                 =-0.2,
+deltamax                =-0.1,
+deltaxsd                 =0.02,
+deltaysd                 =0.02,
+sigmaxmin             =0.05,
+sigmaxmax            = 0.15,
+sigmaymin		  = 0.2,
+sigmaymax		  = 0.4,
+fracnonzeroAlpha = 0.3,
+alphamean  	  = -0.07, #1.0, #-0.07
+alphasd  		  = 0.5,
+omegaxmean    = 3.3,
+omegaymean    = 0.9,
+omegaxsd      = 0.2,
+omegaysd      = 0.2,
+pleiotropy = "POSITIVE",
+pleiomin = 0.006,
+pleiomax   = 0.1, #0.012,
+fractionpleiotropic = 0.4,
+pleiosd = 0.3)
+
+#HERE IS THE GENERATED DATASET
+X = array(simulated$X, dim = N)
+Y = array(simulated$Y, dim = N)
+Z = array(simulated$Z, dim = c(N,J))
+U = array(simulated$U, dim = N)
+
+#SUMMARY STATISTICS FROM THE GENERATED DATASET
+betaX      	<- array(NA,    dim=J) 
+betaY      	<- array(NA,    dim=J)
+sebetaY    	<- array(NA,    dim=J)
+sebetaX    	<- array(NA,    dim=J)
+for(isnp in 1:J){
+   regX    			  <- lm(X ~ Z[,isnp])
+   regY 			    <- lm(Y ~ Z[,isnp])
+   betaX[isnp] 		<- summary(regX)$coefficients[2,1]
+   sebetaX[isnp] 	<- summary(regX)$coefficients[2,2]
+   betaY[isnp] 		<- summary(regY)$coefficients[2,1]
+   sebetaY[isnp] 	<- summary(regY)$coefficients[2,2]
+}
+
+
+
+via 			  = abs(betaX/sebetaX)#eliminare
+quali 			= via > 1.96#eliminare
+quantistrong[isimul] 		= sum(quali)#eliminare
+quali       = rep(TRUE,length(via))#eliminare
+# ELIMINARE [QUALI] DALLE PROSSIME ISTRUZIONI
+oggetto 	  = mr_input(bx = as.numeric(betaX[quali]), 
+			bxse = as.numeric(sebetaX[quali]), 
+			by   = as.numeric(betaY[quali]),
+			byse = as.numeric(sebetaY[quali]), 
+			correlation 		= cor(Z),
+      exposure = "X ", outcome = "Y", 
+  		snps = colnames(Z)[quali])
+
+risultato = mr_allmethods(oggetto, method = "all")
+thetamedianestimate 	= risultato$Values[2,2]
+
+Mlow[isimul] 		= risultato$Values[2,4]#eliminare
+Mhigh[isimul] 		= risultato$Values[2,5]#eliminare
+Mmediana[isimul] 	= risultato$Values[2,2]#eliminare
+Mcover[isimul] 	= (THETA >= Mlow) & (THETA <= Mhigh[isimul])#eliminare
+Mpositive[isimul] 	= Mlow[isimul] > 0#eliminare
+Mbias[isimul] 		= Mmediana[isimul] - THETA#eliminare
+
+
+
+#INITIALIZING THE MARKOV CHAINS
+if(is.na(thetamedianestimate))thetamedianestimate=0
+init_list 			= list(c1=list(theta=thetamedianestimate,
+                  			beta=rep(0,J),alpha=betaX,deltax=0,
+					              deltay=0,u=rep(0,N)))
+
+# RUNNING THE CHAIN
+fit       <- stan(model_code=stanmodelcode, iter=howmanyMCMCiterations,
+               chains=1, init=init_list, verbose=F)
+
+
+# POSTERIOR ANALYSIS
+
+#Nella versione ristretta da uploadare, limitarsi a valutare i due coverage
+theta		                 = extract(fit,pars='theta',permuted=FALSE)
+motheta   	             = monitor(theta) #COMPATTARE QUESTE DUE ISTRUZIONI?
+cover[isimul] 	           = (THETA >= motheta[4]) & (THETA <= motheta[8])
+positive[isimul]          = motheta[4] > 0
+bias[isimul] 	           = motheta[6] - THETA
+numera                  = array(seq(1:(2*howManyRuns)), dim = 2*howManyRuns)
+alternativa = array((numera > howManyRuns), dim = 2*howManyRuns)
+nulla = array((numera <= howManyRuns), dim = 2*howManyRuns)
+fatta       = array((numera <= isimul), dim = 2*howManyRuns) 
+effect              =  array(alternativa * fatta, dim = 2*howManyRuns)
+noeffect            = array(nulla * fatta, dim = 2*howManyRuns) 
+covernull                   = signif(sum(cover[noeffect == T])/sum(noeffect),3)
+coveralternative        = signif(sum(cover[effect == T])/sum(effect),3)
+power                       = signif(sum(positive[effect == T])/sum(effect),3)
+meanbiasnull            = signif(mean(bias[noeffect == T]),3)
+meanbiasalternative = signif(mean(bias[effect == T]),3)
+
+covernullMEDIAN = signif(sum(Mcover[noeffect == T])/sum(noeffect),3)#eliminare
+coveralternativeMEDIAN =  signif(sum(Mcover[effect == T])/sum(effect),3)#eliminare
+powerMEDIAN = signif(sum(Mpositive[effect == T])/sum(effect),3)#eliminare
+meanbiasnullMEDIAN = signif(mean(Mbias[noeffect == T]),3)#eliminare
+meanbiasalternativeMEDIAN = signif(mean(Mbias[effect == T]),3)#eliminare
+
+report = paste("\n\n covernull =", covernull,
+"\n coveralternative =", coveralternative,
+"\n power =", power,
+"\n bias under null =", meanbiasnull,
+"\n bias under alternative =", meanbiasalternative,
+"\n\n\n\n MEDIAN ESTIMATOR:",#eliminare
+"\n covernull =", covernullMEDIAN,#eliminare
+"\n coveralternativeMEDIAN =", coveralternativeMEDIAN,#eliminare
+"\n power =", powerMEDIAN,#eliminare
+"\n bias under null =", meanbiasnullMEDIAN,#eliminare
+"\n bias under alternative =", meanbiasalternativeMEDIAN,#eliminare
+    sep="")
+sink(paste(outdirectory,"sim",isimul,".txt",sep=""))
+cat(report)
+sink()
+
+
+}
+@
+
+
+
+\end{document}
