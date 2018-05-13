@@ -71,7 +71,8 @@ FILES CURRENTLY INCLUDED IN THIS REPOSITORY:
 No external data are provided.
 
 The file SweaveDocument contains a basic Sweave template. The document contains both LaTeX text sections and chunks of R code, interweaved 
-with one another. This will generate a PDF file that includes narrative and analysis, graphics, code, and the results of computations.
+with one another. Running this from within Rstudio will generate a PDF file that includes narrative and analysis, graphics, code, 
+and the results of computations.
 You can use the document as a basis for developing more elaborate analyses, by altering both the LaTeX narrative and the 
 R code. Currently, the document contains two functions R that perform an essential role in the implementation of a
 Mendelian Randomisation analysis, and an illustrative implementation of an analysis where a dataset is simulated from a basic
