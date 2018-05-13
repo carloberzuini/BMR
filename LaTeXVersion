@@ -1,0 +1,550 @@
+\documentclass{article}
+\usepackage{Sweave}
+\begin{document}
+
+\raggedright
+
+%\input{DaCaricare-concordance}
+
+\title{Software attached to the paper ``A Bayesian approach
+to Mendelian randomisation with
+multiple pleiotropic variants'', by C. Berzuini, H. Guo,
+S. Burgess and L. Bernardinelli}
+
+\author{}
+
+\maketitle
+
+\vspace{1cm}
+
+%Most recent update: 16 April 2018 Cambridge
+
+
+\vspace{0.3cm}
+
+\noindent The software described in this document 
+is maintained by Carlo Berzuini,
+Centre for Biostatistics, The University of
+Manchester, Manchester, UK:
+
+\vspace{0.2cm}
+
+\begin{center}
+carlo.berzuini@manchester.ac.uk
+\end{center}
+
+\vspace{0.2cm}
+
+\noindent Use of this software
+requires an installation of
+the statistical package {\tt R} and of the
+probabilistic modelling language {\tt STAN}.
+For links to up-to-date code, examples, manuals,
+bug reports, feature requests, and
+everything else related to {\tt STAN}, see the {\tt STAN}
+home page: http://mc-stan.org/.
+The {\tt R} interface to {\tt STAN} is {\tt Rstan}.
+The {\tt Rstan} home page is
+http://mc-stan.org/rstan.html. One of {\tt STAN}'s virtues
+is  support of variational inference. This is an approximate
+Bayesian inference technique
+(Jordan et al., 1999; Wainwright and Jordan, 2008)
+that provides an approximation nof the
+posterior distribution, $P( unknown \;
+parameters \mid known \; quantities)$, for an efficient bounding of
+the search space.
+
+\vspace{0.3cm}
+
+\noindent The user may wish to implement our method with the
+aid of the {\tt R} function and of the {\tt STAN}
+program described in the following two sections.
+
+\section*{STAN program for MCMC estimation of the proposed Mendelian
+randomisation method}
+
+\noindent The function below specifies model (3.1-3.3) 
+in a format suitable for input to {\tt STAN}. 
+More specifically, the model is specified through a conditional
+probability function
+$P(\psi \mid X,Y,U; Z)$,
+where $\psi$ denotes a vector of modeled (random)
+unknown model parameters
+(or latent variables, or missing data), $X$ is the vector of modeled
+observed exposures, $Y$ is the vector of modeled
+observed outcome values, $Z$ is the unmodeled observed matrix
+of instrumental variable values, and $(N,J)$ its dimensions.
+The symbols used in the program below are consistent with
+those used in the paper.
+The matrix $Z$ and its dimensions must reside in the {\tt R} workspace.
+
+\vspace{0.3cm}
+
+\noindent The program begins by specifying a function
+named VECSQRT() that calculates the element-wise square
+root of an input vector.
+
+\vspace{0.3cm}
+
+\noindent The DATA BLOCK section of the program contains declarations of 
+the observed variables in the problem (data). These are:
+\begin{description}
+\item[$N$] is the number of sample units. Constrained ($> 0$) integer.
+\item[$J$] is the number of instruments. Constrained ($> 0$) integer.
+\item[$Z$] is an $N \times J$ real-valued matrix of 
+instrumental information, with $z_{ik}$
+representing the value of instrument $k$ in unit $i$. Unconstrained.
+\item[$X$] is a real-valued $N$-vector of exposure values, with $x_i$ representing
+the value of the exposure for unit $i$. Unconstrained.
+\item[$Y$] is a real-valued $N$-vector of outcome values, with $y_i$
+representing the value of the outcome for unit $i$, expressed
+on an interval scale. Unconstrained.
+\end{description}
+
+\vspace{0.3cm}
+
+\noindent The PARAMETERS BLOCK section of the program
+contains declarations of the 
+unobserved model parameters and hyperparameters..
+
+\vspace{0.3cm}
+
+\noindent The TRANSFORMED PARAMETERS section of the program 
+specifies parameter vector $\beta$ to follow a
+horseshoe independence prior. $\beta$ is a transformed
+parameter in the sense that it is a stochastic
+quantity defined in terms of a deterministic function
+of other parameters in the model.
+
+\vspace{0.3cm}
+
+\noindent The first three lines of the MODEL BLOCK
+in the program define the conditional likelihood of the
+data, as a function of the model parameters. The remaining lines
+of the block specify the prior distribution of the
+model parameters and hyperparameters. Most parameters 
+and hyperparameters in our model have
+a uniform, "ignorance", prior distribution, that requires no input 
+from the user. For such parameters, in
+a {\tt STAN} program, we can simply omit the specification
+of a prior. A non-ignorance prior specification
+is only given for vewctor $\alpha$. The strength
+$\alpha_k$ of each $k$th instrument
+is specified to follow a
+$N(\mu_{\alpha}, \sigma_{\alpha})$
+prior whose hyperparameters, 
+$\mu_{\alpha}$ and $\sigma_{\alpha}$, are taken to follow
+a uniform prior distribution. Of special inferential
+interest among the parameters in this model
+is the causal effect
+of $X$ on $Y$, denoted as $\theta$.
+
+\begin{Schunk}
+\begin{Sinput}
+> stanmodelcode <-'
++ /* lg_t.stan */
++ functions {
++ // Vector square root
++ vector vecsqrt(vector x) {
++ 	vector[dims(x)[1]] res;
++ 	for (m in 1:dims(x)[1]){
++ 		res[m] = sqrt(x[m]);
++ 	}
++ return res; }
++ }
++ data {
++   int<lower=0> N; 
++   int<lower=0> J;    
++   matrix[N,J] Z;
++   vector[N] X; 
++   vector[N] Y; 
++ }
++ parameters {
++   real <lower=0> sigmax; 
++   real <lower=0> sigmay;
++   real <lower=0> sigmaalpha;
++   real<lower=0> r1_global;
++   real<lower=0> r2_global;
++   real mualpha;
++   real omegax;
++   real omegay;
++   real deltax;
++   real deltay;
++   real theta;
++   vector[N] u; 
++   vector[J] z;
++   vector<lower=0>[J] r1_local;
++   vector<lower=0>[J] r2_local;
++   vector[J] alpha;
++ }
++ transformed parameters {
++    real<lower=0> tau;
++    vector<lower=0> [J] lambda;
++    vector[J] beta;
++    tau      = r1_global * sqrt(r2_global);
++    lambda	  = r1_local .* vecsqrt(r2_local);
++    beta	    =  z .* lambda*tau;
++ }
++ model {
++   X 	~ normal(omegax+Z*alpha+u*deltax, sigmax);
++   Y 	~ normal(omegay+Z*beta+X*theta+u*deltay, sigmay);
++   u 	~ normal(0,1);
++   
++   for(k in 1:J){
++     alpha[k] ~ normal(mualpha, sigmaalpha);
++   }
++ // Constructing the prior for the lambda vector
++     z ~ normal(0, 1);
++     r1_local ~ normal(0.0, 1.0);
++     r2_local ~ inv_gamma(0.5, 0.5);
++ // Constructing the prior for tau
++     r1_global ~ normal(0.0, 1.0);
++     r2_global ~ inv_gamma(0.5, 0.5);
++     }
++ '
+\end{Sinput}
+\end{Schunk}
+
+\section*{{\tt GENERATE} function}
+
+\noindent {\bf AIM:} This {\tt R} function generates a simulated
+dataset. Can be used within a simulation loop.
+
+\vspace{0.3cm}
+
+\noindent {\bf OUTPUT:} conditional on an input $N \times J$ matrix of
+values for the instrumental variables, $Z$, and on a value
+THETA for the causal effect, this function produces
+an output list with containing realisations of $X$ and $Y$.
+The output list also contains $Z$. 
+
+\begin{Schunk}
+\begin{Sinput}
+> generate <- function(N,J,THETA,Z,deltamin,deltamax,deltaxsd,
++                      deltaysd,sigmaxmin,sigmaxmax,sigmaymin,
++                      sigmaymax,fracnonzeroAlpha,alphamean,
++                      alphasd,omegaxmean,omegaymean,omegaxsd,
++                      omegaysd,pleiotropy,pleiomin, pleiomax,
++                      fractionpleiotropic,pleiosd){
++ U 				= array(rnorm(N, mean=0, sd=1), dim = N)
++ MEANDELTA = runif(1, deltamin, deltamax)
++ DELTAX 		= rnorm(1, mean= MEANDELTA, sd=deltaxsd)
++ DELTAY 		= rnorm(1, mean= MEANDELTA, sd=deltaysd)
++ nonzeroAlpha  = round(fracnonzeroAlpha*J)
++ ALPHA = array(rep(0,J),dim=J)
++ ALPHA[sample(c(1:J),size=nonzeroAlpha,prob=rep(1,J),replace=F)] = 
++           rnorm(nonzeroAlpha, mean= alphamean, sd=alphasd)
++ OMEGAX 		= rnorm(1,mean=omegaxmean,sd=omegaxsd)
++ OMEGAY 		= rnorm(1,mean=omegaymean,sd=omegaysd)
++ X 				= array(Z%*%ALPHA, dim = N)
++ X 				= X+OMEGAX+U*DELTAX
++ SIGMAX		= runif(1,sigmaxmin,sigmaxmax)
++ EPS 			= array(rnorm(N, mean=0, sd=SIGMAX), dim=N)
++ X 			  = X+EPS
++ MEANPLEIO = 0
++ PLEIO 		= runif(1,pleiomin,pleiomax)
++ if(pleiotropy == "POSITIVE")MEANPLEIO = PLEIO
++ if(pleiotropy == "NEGATIVE")MEANPLEIO = -PLEIO
++ BETA = array(rep(0,J), dim=J)
++ HOWMANYPLEIOTROPIC = round(fractionpleiotropic*J)
++ BETA[sample(c(1:J),size=HOWMANYPLEIOTROPIC,prob=rep(1,J),replace=F)] = 
++           rnorm(HOWMANYPLEIOTROPIC,mean=MEANPLEIO,sd=pleiosd)
++ SIGMAY 		= runif(1,sigmaymin,sigmaymax)
++ EPSILON 	= array(rnorm(N, mean=0, sd=SIGMAY), dim=c(N,1))
++ esposizione 	= array(X*THETA, dim=c(N,1))
++ confo		= array(U*DELTAY, dim= c(N,1))
++ YBUF 		= OMEGAY+Z%*%BETA+esposizione+confo
++ YBUF 		= YBUF+EPSILON
++ Y 			= array(YBUF, dim=N)
++ dataset= list(X=X,Y=Y,Z=Z,U=U)
++ dataset
++ }
+\end{Sinput}
+\end{Schunk}
+
+\noindent {\bf HOW IS THE OUTPUT OF THIS FUNCTION GENERATED:}
+realisations of $\delta_X$ and $\delta_Y$ are
+independently drawn from  $N($ {\tt MEANDELTA, deltaxsd} $)$
+and from  $N($ {\tt MEANDELTA, deltaysd} $)$, respectively,
+where {\tt MEANDELTA}
+is from a rectangular
+distribution on ({\tt deltamin, deltamax}).
+Realisations of {\tt SIGMAX} and {\tt SIGMAY}
+are drawn from rectangular
+distributions on ({\tt sigmaxmin, sigmaxmax}) and
+({\tt sigmaymin, sigmaymax}), respectively.
+The elements of {\tt ALPHA} are set to $0$, except
+that a fraction {\tt fracnonzeroAlpha} of them
+are randomly selected and independently drawn from 
+$N(mean=$ {\tt alphamean} $,sd=$ {\tt alphasd}).
+Parameters {\tt OMEGAX} and {\tt OMEGAY}
+are randomly drawn from
+$N(mean=$ {\tt omegaxmean} $,sd= $ 
+{\tt omegaxsd})
+and $N(mean=$ {\tt omegaymean} $,sd= $ 
+{\tt omegaysd}), respectively.
+Elements of
+{\tt BETA} are set to zero, except for a fraction
+{\tt fractionpleiotropic} of them, which
+are randomly selected and independently drawn from 
+$N(mean=$ {\tt MEANPLEIO} $,sd= $ {\tt pleiosd}), with
+{\tt MEANPLEIO} from a rectangular distribution
+on ({\tt pleiomin, pleiomax}). The elements of {\tt BETA}
+are then multiplied
+by $(1,-1,0)$ according as the input argument {\tt pleiotropy}
+is "POSITIVE", "NEGATIVE" or "BALANCED". Conditional on all
+the above parameters, on the value {\tt THETA} for the causal effect
+and on $Z$, the function generates
+the values of $X$ and $Y$ in
+accord with Equations (3.1-3.3) of the paper and returns them
+bundled with $Z$ in
+the output list. The 
+above described, rather involved, parameter setting procedure
+has been designed to allow the user to simulate a large variety of
+data generating processes. 
+
+
+\section*{Elementary Application Example}
+
+\noindent We set the {\tt R} environment by loading
+two required libraries, which the user can install from CRAN:
+
+\begin{Schunk}
+\begin{Sinput}
+> library(rstan)
+> library(MendelianRandomization)
+\end{Sinput}
+\end{Schunk}
+
+\noindent We define a useful formatting function:
+
+\begin{Schunk}
+\begin{Sinput}
+> f = function(X1)gsub("0\\.","\\.", X1)
+\end{Sinput}
+\end{Schunk}
+
+\noindent We read the data, which in this
+illustrative example consist
+of an $N \times J$ matrix denoted as $Z$, with $N=500$ and $J=60$,
+where $z_{ij}$ is the value of instrument $j$ in individual $i$.
+The components of $Z$ arise with values in $(0,1,2)$, but have
+been centered prior to analysis.
+
+\begin{Schunk}
+\begin{Sinput}
+> load(file="Z.rda")
+> J = ncol(Z)
+> N = nrow(Z)
+\end{Sinput}
+\end{Schunk}
+
+\noindent Unlike existing frequentist Mendelian randomisation methods, ours
+has been designed with both independent and correlated instruments
+in mind. Let us now calculate the average instrument-instrument correlation
+in our data:
+
+\begin{Schunk}
+\begin{Sinput}
+> signif(mean(cor(Z)),3)
+\end{Sinput}
+\begin{Soutput}
+[1] 0.329
+\end{Soutput}
+\end{Schunk}
+
+\noindent For purposes of illustration, we are
+now going to simulate a dataset, and then apply to the generated
+dataset the Mendelian randomisation method proposed in the paper.
+In simulating the data, we assume that the causal effect of $X$ on $Y$
+is $0.35$:
+
+\begin{Schunk}
+\begin{Sinput}
+> THETA = 0.35
+\end{Sinput}
+\end{Schunk}
+
+\noindent The dataset is simulated with the aid of the
+previously described GENERATE function: 
+
+\begin{Schunk}
+\begin{Sinput}
+> simulated = generate(N,J,THETA,Z,
++ deltamin      =-0.2,
++ deltamax      =-0.1,
++ deltaxsd      =0.02,
++ deltaysd      =0.02,
++ sigmaxmin     =0.05,
++ sigmaxmax     = 0.15,
++ sigmaymin    = 0.2,
++ sigmaymax		= 0.4,
++ fracnonzeroAlpha = 0.3,
++ alphamean  	= 1.0, #-0.07
++ alphasd  		= 0.2,
++ omegaxmean    = 3.3,
++ omegaymean    = 0.9,
++ omegaxsd      = 0.2,
++ omegaysd      = 0.2,
++ pleiotropy = "POSITIVE",
++ pleiomin = -0.1,#0.006,
++ pleiomax   = 0.3,#0.25, #0.36, #0.012,
++ fractionpleiotropic = 0.49,
++ pleiosd = 0.1#0.05
++ )
+\end{Sinput}
+\end{Schunk}
+
+
+\noindent The generated dataset is re-expressed
+in terms of an exposure vector $X$, an outcome vector $Y$, a confounder vector
+$U$ and the matrix of instrumental data, $Z$:
+
+\begin{Schunk}
+\begin{Sinput}
+> X = array(simulated$X, dim = N)
+> Y = array(simulated$Y, dim = N)
+> Z = array(simulated$Z, dim = c(N,J))
+> U = array(simulated$U, dim = N)
+\end{Sinput}
+\end{Schunk}
+
+
+\vspace{0.2cm}
+
+\noindent We now calculate a $J$-vector $\beta_X$, that
+containins the estimated
+unconditional slope of the (univariate) least squares regression of
+$X$ on each of the $J$ instrumental variables. 
+Also calculated is a $J$-vector $\beta_Y$,
+that contains the estimated
+unconditional slope of the least squares regression of $Y$ on each
+instrumental variable. We also calculate
+the $J$-vectors {\tt sebetaX} and {\tt sebetaY},
+containing the standard
+errors for each element of $\beta_X$ and $\beta_Y$, respectively:
+
+\begin{Schunk}
+\begin{Sinput}
+> betaX      	<- array(NA,    dim=J) 
+> betaY      	<- array(NA,    dim=J)
+> sebetaY    	<- array(NA,    dim=J)
+> sebetaX    	<- array(NA,    dim=J)
+> for(isnp in 1:J){
++    regX    			  <- lm(X ~ Z[,isnp])
++    regY 			    <- lm(Y ~ Z[,isnp])
++    betaX[isnp] 		<- summary(regX)$coefficients[2,1]
++    sebetaX[isnp] 	<- summary(regX)$coefficients[2,2]
++    betaY[isnp] 		<- summary(regY)$coefficients[2,1]
++    sebetaY[isnp] 	<- summary(regY)$coefficients[2,2]
++ }
+\end{Sinput}
+\end{Schunk}
+
+\noindent The $\beta_X$ and $\beta_Y$ (and their standard errors)
+are used to calculate
+a preliminary estimate of the causal effect,
+called {\tt thetamedianestimate}, via weighted median
+estimator:
+
+\begin{Schunk}
+\begin{Sinput}
+> oggetto 	  = mr_input(bx = as.numeric(betaX), 
++ 			bxse = as.numeric(sebetaX), 
++ 			by   = as.numeric(betaY),
++ 			byse = as.numeric(sebetaY), 
++ 			correlation 		= cor(Z),
++       exposure = "X ", outcome = "Y", 
++   		snps = colnames(Z))
+> risultato = mr_allmethods(oggetto, method = "all")
+> thetamedianestimate 	= risultato$Values[2,2]
+> thetamedianestimate
+\end{Sinput}
+\begin{Soutput}
+[1] 0.3872661
+\end{Soutput}
+\end{Schunk}
+
+\vspace{0.2cm}
+
+\noindent The next step consists of setting the initial
+values of some model parameters, for use in the definition
+of the starting points of the Markov chains. 
+The preliminary estimate of the causal effect is included 
+as initial value for the causal effect parameter:
+
+\begin{Schunk}
+\begin{Sinput}
+> init_list 			= list(c1=list(theta=thetamedianestimate,
++                   			beta=rep(0,J),alpha=betaX,deltax=0,
++ 					              deltay=0,u=rep(0,N)))
+\end{Sinput}
+\end{Schunk}
+
+\noindent 600 iteration of a Markov chain with equilibrium
+distribution equal to the posterior distribution of our model
+are run. The first 300 iterations are regarded
+as the "warming" stage of the Markov chain, 
+after which the chain is assumed to be in equilibrium.
+The parameter values generated
+during the remaining 300 iterations are used for
+inference, such as for calculating posterior
+means and credible intervals for
+the quantities f inferential interest
+or for functions of them. In this particular example, for simplicity,
+we run a single chain:
+
+\begin{Schunk}
+\begin{Sinput}
+> fit       <- stan(model_code=stanmodelcode, iter=1000,
++                chains=1, init=init_list, verbose=F)
+\end{Sinput}
+\end{Schunk}
+
+\noindent We shall now analyse the generated posterior samples. First,
+we extract the samples of parameter {\tt theta}, that represents
+the causal effect of inferential interest:
+
+\begin{Schunk}
+\begin{Sinput}
+> theta		                 = extract(fit,pars='theta',permuted=FALSE)
+> motheta   	             = monitor(theta)
+\end{Sinput}
+\begin{Soutput}
+Inference for the input samples (1 chains: each with iter=500; warmup=250):
+
+      mean se_mean sd 2.5% 25% 50% 75% 97.5% n_eff Rhat
+theta  0.4       0  0  0.3 0.3 0.4 0.4   0.4    48    1
+
+For each parameter, n_eff is a crude measure of effective sample size,
+and Rhat is the potential scale reduction factor on split chains (at 
+convergence, Rhat=1).
+\end{Soutput}
+\end{Schunk}
+
+\noindent We previously set the "true" value of {\tt theta}
+to be equal to 0.35.Its output 95\% credible interval is:
+
+\begin{Schunk}
+\begin{Sinput}
+> cat("\n (", motheta[4],",",
++ motheta[8],")",sep="")
+\end{Sinput}
+\begin{Soutput}
+ (0.3374125,0.3787554)
+\end{Soutput}
+\end{Schunk}
+
+Its posterior mean is:
+
+\begin{Schunk}
+\begin{Sinput}
+> motheta[6]
+\end{Sinput}
+\begin{Soutput}
+[1] 0.3577514
+\end{Soutput}
+\end{Schunk}
+
+
+\end{document}
