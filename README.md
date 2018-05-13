@@ -20,7 +20,7 @@ while allowing an unspecified subset of them to affect the outcome directly. In 
 
 MOTIVATION: The existing frequentist approaches to MR do not coherently account for important sources of uncertainty, such as the
 uncertainty arising from the estimation of the instrument-exposure (i-e) associations. Hence our concern that these methods may 
-yield over-optimistic results. We attempt to remedy this by proposing a Bayesian approach to MR (Burgess 2010, 2012; Didelez 2007;
+yield over-optimistic results. We attempt to remedy this by proposing a Bayesian approach to MR (Burgess 2010; Didelez 2007;
 Jones 2012) which deals with cryptic pleiotropy, and can in principle acknowledge uncertainty at all levels of the model. 
 
 PROPOSED BAYESIAN FRAMEWORK FOR MR: Our method allows the user to shape the prior of the entertained MR model on the basis of 
@@ -30,13 +30,13 @@ freedom in elaborating the  basic model. At the current point in time, this repo
 non-linear dependencies and  model uncertainty, and assume that the exposure variable X and and the noutcome variable Y are 
 continuous.
 
-The current version of the proposed method relaxes the  exclusion-restriction assumption, whereby an instrument cannot affect 
-the outcome other than through their influence on the exposure, and allows the instruments to be correlated, for an increased 
-power to  detect the  causal effect of interest, and to exert direct (sometimes called pleiotropic) effects on the outcome. 
-By having the pleiotropic effects represented in the model by unknown parameters, and by imposing a prior distribution that 
-assumes an  unspecified subset  of them to be zero, we obtain a proper  posterior distribution for the causal effect of interest. 
-This posterior we sample via  Markov chain Monte Carlo to obtain point and interval  estimates. The model priors require a 
-minimal input from  the user. 
+The current version of the proposed method relaxes the  exclusion-restriction assumption, thereby allowing an instrument to affect 
+the outcome both indirectly (via the exposure) and through a direct (pleiotropic) effect, provided no instrument is correlated with
+the exposure-outcome confounders. The method also allows the instruments to be correlated, for an increased  power to  detect the
+causal effect of interest. By having the pleiotropic effects represented in the model by unknown parameters, and by imposing a 
+Bayesian shrinkage (Carvalho et al, 2010) prior distribution that assumes an  unspecified subset of these parameters to be zero, we 
+obtain a proper posterior distribution  for the causal effect of interest.  This posterior we sample via  Markov chain Monte Carlo 
+to obtain point and interval  estimates. The model priors require a  minimal input from  the user. 
 
 An upcoming article on Biostatistics, by Carlo Berzuini, Hui Guo, Stephen Burgess and Luisa Bernardinelli, describes the method 
 and reports about a simulation experiment that assesses its performance in terms of type-1 error and power in various
@@ -66,25 +66,59 @@ bug reports, feature requests, and  everything else related to  STAN, see the ST
 implementation uses the R interface  to STAN called Rstan. The Rstan home page is http://mc-stan.org/rstan.html.
 
 
-FILES CURRENTLY INCLUDED IN THIS REPOSITORY:
+THREE FILES ARE CURRENTLY INCLUDED IN THIS REPOSITORY:
 
-The file SweaveDocument contains a basic Sweave template. The document contains both LaTeX text sections and chunks of R code, interweaved 
-with one another. Running this from within Rstudio will generate a PDF file that includes narrative and analysis, graphics, code, 
-and the results of computations. You can use the document as a basis for developing more elaborate analyses, by altering both the 
-LaTeX narrative and the  R code. Currently, the document contains two functions R that perform an essential role in the implementation 
-of a Mendelian Randomisation analysis, and an illustrative implementation of an analysis where a dataset is simulated from a basic
-Mendelian Randomisation model, in accord with modifiable parameter values, and then analysed by the method discussed in the
-above mentioned paper. When using Rstudio, you can insert an R chunk via the Chunks menu at the top right of the Rstudio source
-editor. Once the Sweave document is ready, you can run it from within Rstudio to generate the output PDF file.
+FILE 1: The file SweaveDocument contains a basic Sweave template. The document contains both LaTeX text sections and chunks of R 
+code, interweaved  with one another. Running this from within Rstudio will generate a PDF file that includes narrative and 
+analysis, graphics, code,  and the results of computations. You can use the document as a basis for developing more elaborate analyses,
+by altering both the  LaTeX narrative and the  R code. Currently, the document contains two functions R that perform an essential role
+in the implementation  of a Mendelian Randomisation analysis, and an illustrative implementation of an analysis where a dataset is
+simulated from a basic Mendelian Randomisation model, in accord with modifiable parameter values, and then analysed by the method
+discussed in the above mentioned paper. When using Rstudio, you can insert an R chunk via the Chunks menu at the top right of the 
+Rstudio source editor. Once the Sweave document is ready, you can run it from within Rstudio to generate the output PDF file.
 
-The file LaTeXDocument contains the LaTeX output from running SweaveDocument.
+FILE 2: The file LaTeXDocument contains the LaTeX output from running SweaveDocument.
 
-The file PDFDocument has been generated by compiling LaTeXDocument.
+FILE 3: The file PDFDocument has been generated by compiling LaTeXDocument.
 
 No external data are provided.
 
-For any queries write to carlo.berzuini@manchester.ac.uk
+REFERENCES
 
+Berzuini, Dawid and Bernardinelli (eds.) (2012). Causality: Statistical Perspectives and Applications. J. Wiley and Sons.
+
+Bowden, J., Davey~Smith, G., Haycock, P.C. and Burgess, S. (2016). Consistent Estimation in Mendelian Randomization with Some 
+Invalid Instruments Using a Weighted Median Estimator. Genetic Epidemiology. 40, 304-314.
+
+Burgess, S. and Thompson, S.G.} (2010). Bayesian methods for meta-analysis of causal relationships estimated
+using genetic instrumental variables. Statistics in Medicine, 29, 1298-1311.
+
+Carvalho, C.M., Polson, N.G. and Scott, J.G. (2010). The horseshoe estimator for sparse signals. Biometrika, asq017.
+
+Davey Smith, G. and Ebrahim, S. (2003). Mendelian Randomization: Can Genetic Epidemiology Contribute to Understanding
+Environmental Determinants of Disease? International Journal of Epidemiology. 32}, 1-22.
+
+Didelez, V. and Sheehan, N.A. (2007). Mendelian Randomisation as an Instrumental Variable Approach to
+Causal Inference. Statistical Methods in Medical Research. 16, 309-330.
+
+Egger, M., Smith, G.D., Schneider, M. and Minder, C. (1997). Bias in meta-analysis detected by a simple, graphical 
+test. British Medical Journal. 315}(7109), 629-634.
+
+Jones, E.M., Thompson, J.R., Didelez, V. and Sheehan, N.A. (2012). On the choice of parameterisation and priors for 
+the Bayesian analyses of Mendelian randomisation studies. Statistics in Medicine, 31}(14), 1483-1501.
+
+Katan, M.B. (1986). Apoupoprotein E-isoforms, serum cholesterol, and cancer. The Lancet. 327(8479), 507-508.
+
+Lawlor, D.A, Harbord, R.M., Sterne, J.A., Timpson, N. and Davey~Smith, G. (2008). Mendelian randomization: using 
+genes as instruments for making causal inferences in epidemiology. Statistics in Medicine, 27}(8), 1133-1163.
+
+Robinson, P.C., Choi, H.K., Do, R. and Merriman, T.R. (2017). Insight into rheumatological cause and effect 
+through the use of Mendelian randomization. Nature Reviews Rheumatology, 13(193), 486-496.
+
+STAN Development Team (2014). STAN: A C++ library for probability and sampling, version 2.2. http://mc-stan.org/.
+
+Voight, B.F., Ardissino, D. and colleagues. (2012). Plasma HDL cholesterol and risk of myocardial infarction: 
+a Mendelian Randomisation study. The Lancet, 380(9841), 572-580.
 
 
 
